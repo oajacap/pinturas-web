@@ -8,61 +8,46 @@ class LoginController {
         $this->usuario = new Usuario($db);
     }
 
-    // Login del usuario CON DEPURACIÓN
     public function login($identificador, $password) {
-        // DEBUG: Mostrar lo que se recibió
-        error_log("=== LOGIN DEBUG ===");
-        error_log("Identificador recibido: " . $identificador);
-        error_log("Password recibido: " . $password);
+        error_log("=== LOGIN INTENT ===");
+        error_log("Identificador: " . $identificador);
         
-        // Buscar por email o username
         $user = null;
         
-        // Intentar buscar por email primero
         if (filter_var($identificador, FILTER_VALIDATE_EMAIL)) {
-            error_log("Es un email válido, buscando por email...");
+            error_log("Buscando por EMAIL");
             $user = $this->usuario->obtenerPorEmail($identificador);
         }
         
-        // Si no encontró por email, buscar por username
         if (!$user) {
-            error_log("No encontró por email, buscando por username...");
+            error_log("Buscando por USERNAME");
             $user = $this->usuario->obtenerPorUsuario($identificador);
         }
         
-        // DEBUG: Ver si encontró el usuario
-        if ($user) {
-            error_log("Usuario encontrado:");
-            error_log("- ID: " . $user['usuario_id']);
-            error_log("- Email: " . $user['email']);
-            error_log("- Username: " . ($user['username'] ?? 'NULL'));
-            error_log("- Password en BD: " . $user['password']);
-            error_log("- Rol: " . $user['nombre_rol']);
-            
-            // Comparar contraseñas
-            if ($user['password'] === $password) {
-                error_log("✅ Contraseñas coinciden! Login exitoso");
-                
-                // Iniciar sesión
-                $this->iniciarSesion($user);
-                
-                // Actualizar último login
-                $this->usuario->actualizarUltimoLogin($user['usuario_id']);
-                
-                return true;
-            } else {
-                error_log("❌ Contraseñas NO coinciden!");
-                error_log("  Esperaba: " . $user['password']);
-                error_log("  Recibió: " . $password);
-            }
-        } else {
-            error_log("❌ Usuario NO encontrado en la base de datos");
+        if (!$user) {
+            error_log(" Usuario NO encontrado");
+            return false;
         }
         
-        return false;
+        error_log(" Usuario encontrado: " . $user['email']);
+        error_log("Rol: " . $user['nombre_rol']);
+        
+        if ($user['password'] !== $password) {
+            error_log(" Contraseña incorrecta");
+            return false;
+        }
+        
+        error_log(" Contraseña correcta");
+        
+        
+        $this->iniciarSesion($user);
+        
+        
+        $this->usuario->actualizarUltimoLogin($user['usuario_id']);
+        
+        return true;
     }
 
-    // Iniciar sesión y guardar datos
     private function iniciarSesion($user) {
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
@@ -79,7 +64,7 @@ class LoginController {
         $_SESSION['logueado'] = true;
         $_SESSION['tiempo_login'] = time();
         
-        error_log("✅ Sesión iniciada para usuario: " . $user['email']);
+        error_log(" Sesión iniciada correctamente");
     }
 
     public function logout() {
@@ -131,6 +116,7 @@ class LoginController {
         $permisos = $_SESSION['permisos'] ?? [];
         $modulos = $permisos['modulos'] ?? [];
 
+        
         if (in_array('todos', $modulos)) {
             return true;
         }
@@ -152,7 +138,7 @@ class LoginController {
         }
 
         if ($this->estaLogueado()) {
-            $timeout = 1800;
+            $timeout = 1800; 
             $tiempo_actual = time();
             $tiempo_login = $_SESSION['tiempo_login'] ?? 0;
 
@@ -174,7 +160,7 @@ class LoginController {
         }
 
         if (!$this->verificarInactividad()) {
-            header("Location: index.php?action=loginForm&mensaje=" . urlencode("Sesión expirada por inactividad"));
+            header("Location: index.php?action=loginForm&mensaje=" . urlencode("Sesión expirada"));
             exit();
         }
     }
@@ -183,7 +169,9 @@ class LoginController {
         $this->requiereLogin();
 
         if (!$this->tienePermiso($modulo)) {
-            header("Location: index.php?action=dashboard&error=" . urlencode("No tiene permisos para acceder a este módulo"));
+            
+            $_SESSION['error'] = "No tiene permisos para acceder al módulo: " . ucfirst($modulo);
+            header("Location: index.php?action=dashboard");
             exit();
         }
     }
@@ -192,9 +180,72 @@ class LoginController {
         $this->requiereLogin();
 
         if (!$this->esRol($nombre_rol)) {
-            header("Location: index.php?action=dashboard&error=" . urlencode("Acceso denegado"));
+            $_SESSION['error'] = "Acceso denegado. Requiere rol: " . $nombre_rol;
+            header("Location: index.php?action=dashboard");
             exit();
         }
+    }
+
+    public function redirigirSegunRol() {
+        if (!$this->estaLogueado()) {
+            header("Location: index.php?action=loginForm");
+            exit();
+        }
+
+        $rol = $_SESSION['nombre_rol'];
+
+        switch ($rol) {
+            case 'Administrador':
+        
+                header("Location: index.php?action=dashboard");
+                break;
+
+            case 'Gerente':
+            
+                header("Location: index.php?action=reportes");
+                break;
+
+            case 'Digitador':
+            
+                header("Location: index.php?action=listarProductos");
+                break;
+
+            case 'Cajero':
+                
+                header("Location: index.php?action=formularioFactura");
+                break;
+
+            case 'Cliente':
+                
+                header("Location: index.php?action=catalogoProductos");
+                break;
+
+            default:
+                
+                header("Location: index.php?action=dashboard");
+                break;
+        }
+        exit();
+    }
+
+    public function obtenerModulosDisponibles() {
+        if (!$this->estaLogueado()) {
+            return [];
+        }
+
+        $permisos = $_SESSION['permisos'] ?? [];
+        $modulos = $permisos['modulos'] ?? [];
+
+        
+        if (in_array('todos', $modulos)) {
+            return [
+                'clientes', 'empleados', 'productos', 'ventas', 
+                'facturas', 'reportes', 'inventario', 'pagos',
+                'proveedores', 'sucursales', 'configuracion'
+            ];
+        }
+
+        return $modulos;
     }
 
     public function registrar($username, $email, $password, $rol_id = 5) {
